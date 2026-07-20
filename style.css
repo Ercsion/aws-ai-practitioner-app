@@ -287,7 +287,18 @@ button {
   margin-bottom: 8px;
   display: flex;
   justify-content: space-between;
+  align-items: center;
 }
+.q-progress-jump {
+  font-size: calc(12px * var(--font-scale));
+  color: var(--navy);
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.q-progress-jump:active { background: var(--bg); }
 
 .q-card {
   background: var(--card);
@@ -586,4 +597,20 @@ button {
   color: var(--navy);
   font-weight: 600;
   padding: 6px;
+}
+
+/* ---------- Jump-to-question panel ---------- */
+.jump-row {
+  display: flex;
+  gap: 10px;
+}
+.jump-row .num-input {
+  flex: 1 1 auto;
+  width: auto;
+}
+.jump-go-btn {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 8px 18px;
+  margin-top: 0;
 }

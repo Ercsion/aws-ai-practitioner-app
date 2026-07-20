@@ -20,7 +20,8 @@
       lang: "both",          // 'zh' | 'en' | 'both'
       wrongIds: [],          // question ids ever answered wrong (current wrong book)
       progress: {},          // id -> { attempted: bool, correct: bool }
-      fontIndex: DEFAULT_FONT_INDEX // index into FONT_SCALES
+      fontIndex: DEFAULT_FONT_INDEX, // index into FONT_SCALES
+      quizSeqCursor: 1       // next question id to start from for sequential quizzes
     };
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
@@ -129,6 +130,51 @@
   }
 
   elBtnFontSize.addEventListener("click", openFontSizePanel);
+
+  // ---------- Jump-to-question panel (reused by study mode progress bar) ----------
+  function openJumpPanel(onJump) {
+    if (elOverlayRoot.querySelector(".jump-panel")) return;
+    var backdrop = document.createElement("div");
+    backdrop.className = "overlay-backdrop";
+    backdrop.addEventListener("click", closeJumpPanel);
+
+    var panel = document.createElement("div");
+    panel.className = "font-size-panel jump-panel";
+    panel.addEventListener("click", function (e) { e.stopPropagation(); });
+
+    panel.innerHTML =
+      '<div class="fsp-title">跳转到题目</div>' +
+      '<div class="jump-row">' +
+      '<input type="number" id="jump-input" class="num-input" min="1" max="' + TOTAL + '" placeholder="1-' + TOTAL + '" />' +
+      '<button class="btn-primary jump-go-btn" id="jump-go">跳转</button>' +
+      "</div>";
+
+    elOverlayRoot.appendChild(backdrop);
+    elOverlayRoot.appendChild(panel);
+
+    var input = panel.querySelector("#jump-input");
+    input.focus();
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") doJump();
+    });
+    panel.querySelector("#jump-go").addEventListener("click", doJump);
+
+    function doJump() {
+      var val = parseInt(input.value, 10);
+      if (!val || val < 1 || val > TOTAL) {
+        toast("请输入 1-" + TOTAL + " 之间的题号");
+        return;
+      }
+      closeJumpPanel();
+      onJump(val);
+    }
+  }
+  function closeJumpPanel() {
+    var backdrop = elOverlayRoot.querySelector(".overlay-backdrop");
+    var panel = elOverlayRoot.querySelector(".jump-panel");
+    if (backdrop) backdrop.remove();
+    if (panel) panel.remove();
+  }
 
   // ---------- Navigation / view stack ----------
   var viewStack = [];
@@ -255,6 +301,7 @@
 
   function render() {
     closeFontSizePanel();
+    closeJumpPanel();
     var top = viewStack[viewStack.length - 1];
     elBtnBack.hidden = viewStack.length <= 1;
     elTopTitle.textContent = VIEW_TITLES[top.view] || "AIF-C01 题库";
@@ -399,7 +446,7 @@
     var q = questionById(ids[index]);
 
     var html = "";
-    html += '<div class="q-progress"><span>第 ' + (index + 1) + " / " + ids.length + " 题</span>" +
+    html += '<div class="q-progress"><button class="q-progress-jump" id="btn-jump-progress">第 ' + (index + 1) + " / " + ids.length + " 题 &#9998;</button>" +
       '<span>原题号 #' + q.id + "</span></div>";
 
     html += '<div class="q-card">';
@@ -438,16 +485,29 @@
     if (nextBtn) nextBtn.addEventListener("click", function () {
       if (index < ids.length - 1) replaceView("study", { ids: ids, index: index + 1 });
     });
+
+    var jumpBtn = elApp.querySelector("#btn-jump-progress");
+    if (jumpBtn) jumpBtn.addEventListener("click", function () {
+      openJumpPanel(function (qid) {
+        var newIndex = ids.indexOf(qid);
+        if (newIndex === -1) {
+          toast("当前列表中没有第 " + qid + " 题，请回到设置页从该题开始");
+          return;
+        }
+        replaceView("study", { ids: ids, index: newIndex });
+      });
+    });
   }
 
   // ---- Quiz setup ----
   function renderQuizSetup() {
+    var resumeId = clampSeqCursor(state.quizSeqCursor);
     var html = "";
     html += '<div class="section-title">测试设置</div>';
     html += '<div class="setup-group">' +
       setupRow("题目范围", "", chipGroup("quiz-scope", [["all", "全部题库"], ["custom", "自定义数量"]], "all")) +
       setupRow("题目数量", "范围: 5-" + TOTAL, '<input type="number" id="quiz-count" class="num-input" min="5" max="' + TOTAL + '" value="20" />') +
-      setupRow("题目顺序", "", chipGroup("quiz-order", [["random", "随机"], ["seq", "顺序"]], "random")) +
+      setupRow("题目顺序", "顺序模式将从第 " + resumeId + " 题接续开始", chipGroup("quiz-order", [["random", "随机"], ["seq", "顺序"]], "random")) +
       "</div>";
     html += '<button class="btn-primary" id="btn-start-quiz">开始测试</button>';
 
@@ -467,14 +527,31 @@
       var scope = getChipValue(elApp, "quiz-scope");
       var order = getChipValue(elApp, "quiz-order");
       var ids = QUESTIONS.map(function (q) { return q.id; });
-      if (order === "random") ids = shuffle(ids);
+      var isSeq = order === "seq";
+      if (isSeq) {
+        // Resume sequential order from where the user last left off.
+        ids = ids.filter(function (id) { return id >= resumeId; }).concat(ids.filter(function (id) { return id < resumeId; }));
+      } else {
+        ids = shuffle(ids);
+      }
       if (scope === "custom") {
         var n = parseInt(countInput.value, 10) || 20;
         n = Math.min(Math.max(n, 5), TOTAL);
         ids = ids.slice(0, n);
       }
-      replaceView("quiz", { ids: ids, index: 0, answers: {}, submitted: {} });
+      replaceView("quiz", { ids: ids, index: 0, answers: {}, submitted: {}, seq: isSeq });
     });
+  }
+
+  function clampSeqCursor(id) {
+    if (!id || id < 1 || id > TOTAL) return 1;
+    return id;
+  }
+  function advanceSeqCursor(id) {
+    var next = id + 1;
+    if (next > TOTAL) next = 1;
+    state.quizSeqCursor = next;
+    saveState();
   }
 
   // ---- Quiz mode ----
@@ -483,6 +560,7 @@
     var index = opts.index;
     var answers = opts.answers; // id -> array of selected labels
     var submitted = opts.submitted; // id -> true/false
+    var isSeq = !!opts.seq;
 
     var q = questionById(ids[index]);
     var selected = answers[q.id] || [];
@@ -554,7 +632,7 @@
             cur = [label];
           }
           answers[q.id] = cur;
-          replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted });
+          replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq });
         });
       });
 
@@ -564,17 +642,18 @@
         var correctSet = q.correct.split("");
         var isRight = arraysEqualAsSets(answers[q.id] || [], correctSet);
         if (isRight) markCorrect(q.id); else markWrong(q.id);
-        replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted });
+        if (isSeq) advanceSeqCursor(q.id);
+        replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq });
       });
     }
 
     var prevBtn = elApp.querySelector("#btn-prev");
     if (prevBtn) prevBtn.addEventListener("click", function () {
-      if (index > 0) replaceView("quiz", { ids: ids, index: index - 1, answers: answers, submitted: submitted });
+      if (index > 0) replaceView("quiz", { ids: ids, index: index - 1, answers: answers, submitted: submitted, seq: isSeq });
     });
     var nextBtn = elApp.querySelector("#btn-next");
     if (nextBtn) nextBtn.addEventListener("click", function () {
-      if (index < ids.length - 1) replaceView("quiz", { ids: ids, index: index + 1, answers: answers, submitted: submitted });
+      if (index < ids.length - 1) replaceView("quiz", { ids: ids, index: index + 1, answers: answers, submitted: submitted, seq: isSeq });
     });
     var finishBtn = elApp.querySelector("#btn-finish");
     if (finishBtn) finishBtn.addEventListener("click", function () {
