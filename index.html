@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#232f3e" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
+<title>AIF-C01 题库</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app-root">
+    <header id="top-bar">
+      <button id="btn-back" class="icon-btn" aria-label="返回" hidden>&#8592;</button>
+      <div id="top-title">AIF-C01 题库</div>
+      <button id="btn-font-size" class="icon-btn" aria-label="字体大小">Aa</button>
+      <div id="lang-switch" class="seg-control" role="group" aria-label="语言切换">
+        <button data-lang="zh" class="seg-btn">中</button>
+        <button data-lang="en" class="seg-btn">英</button>
+        <button data-lang="both" class="seg-btn">中英</button>
+      </div>
+    </header>
+
+    <main id="app"></main>
+
+    <nav id="bottom-nav">
+      <button class="nav-btn" data-view="home">
+        <span class="nav-icon">&#8962;</span><span>首页</span>
+      </button>
+      <button class="nav-btn" data-view="study">
+        <span class="nav-icon">&#128218;</span><span>背题模式</span>
+      </button>
+      <button class="nav-btn" data-view="quiz">
+        <span class="nav-icon">&#9998;</span><span>测试模式</span>
+      </button>
+      <button class="nav-btn" data-view="wrongbook">
+        <span class="nav-icon">&#9888;</span><span>错题本</span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="overlay-root"></div>
+
+  <script src="questions-data.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // Register service worker for offline/installable support.
+    // Requires HTTPS or localhost; silently no-ops on plain file:// or HTTP hosting.
+    if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("sw.js").catch(function () { /* ignore */ });
+      });
+    }
+  </script>
+</body>
+</html>

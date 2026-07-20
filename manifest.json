@@ -1,0 +1,25 @@
+{
+  "name": "AIF-C01 题库",
+  "short_name": "AIF-C01",
+  "description": "AWS Certified AI Practitioner (AIF-C01) 题库背题与测试APP",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f6f8",
+  "theme_color": "#232f3e",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
