@@ -507,7 +507,10 @@
     html += '<div class="setup-group">' +
       setupRow("题目范围", "", chipGroup("quiz-scope", [["all", "全部题库"], ["custom", "自定义数量"]], "all")) +
       setupRow("题目数量", "范围: 5-" + TOTAL, '<input type="number" id="quiz-count" class="num-input" min="5" max="' + TOTAL + '" value="20" />') +
-      setupRow("题目顺序", "顺序模式将从第 " + resumeId + " 题接续开始", chipGroup("quiz-order", [["random", "随机"], ["seq", "顺序"]], "random")) +
+      setupRow("题目顺序", "", chipGroup("quiz-order", [["random", "随机"], ["seq", "顺序"]], "random")) +
+      '<div class="setup-row" id="quiz-seq-start-row"><div><div class="lbl">顺序起始题号</div>' +
+      '<div class="sub">顺序模式将从此题号接续开始</div></div>' +
+      '<input type="number" id="quiz-seq-start" class="num-input" min="1" max="' + TOTAL + '" value="' + resumeId + '" /></div>' +
       "</div>";
     html += '<button class="btn-primary" id="btn-start-quiz">开始测试</button>';
 
@@ -523,14 +526,28 @@
     scopeGroup.addEventListener("click", syncCountDisabled);
     syncCountDisabled();
 
+    var seqStartInput = elApp.querySelector("#quiz-seq-start");
+    var seqStartRow = elApp.querySelector("#quiz-seq-start-row");
+    var orderGroup = elApp.querySelector('[data-chip-group="quiz-order"]');
+    function syncSeqStartVisibility() {
+      var order = getChipValue(elApp, "quiz-order");
+      seqStartRow.style.display = order === "seq" ? "" : "none";
+    }
+    orderGroup.addEventListener("click", syncSeqStartVisibility);
+    syncSeqStartVisibility();
+
     elApp.querySelector("#btn-start-quiz").addEventListener("click", function () {
       var scope = getChipValue(elApp, "quiz-scope");
       var order = getChipValue(elApp, "quiz-order");
       var ids = QUESTIONS.map(function (q) { return q.id; });
       var isSeq = order === "seq";
       if (isSeq) {
-        // Resume sequential order from where the user last left off.
-        ids = ids.filter(function (id) { return id >= resumeId; }).concat(ids.filter(function (id) { return id < resumeId; }));
+        var startId = parseInt(seqStartInput.value, 10) || 1;
+        startId = Math.min(Math.max(startId, 1), TOTAL);
+        state.quizSeqCursor = startId;
+        saveState();
+        // Resume sequential order from the chosen starting question.
+        ids = ids.filter(function (id) { return id >= startId; }).concat(ids.filter(function (id) { return id < startId; }));
       } else {
         ids = shuffle(ids);
       }
