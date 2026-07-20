@@ -1,4 +1,4 @@
-/* AIF-C01 题库 - mobile study app
+/* AI Practitioner题库 - mobile study app
  * Pure vanilla JS, no build step, works fully offline as a local file.
  */
 (function () {
@@ -289,7 +289,7 @@
 
   // ---------- Views ----------
   var VIEW_TITLES = {
-    home: "AIF-C01 题库",
+    home: "AI Practitioner题库",
     "study-setup": "背题模式",
     study: "背题模式",
     "quiz-setup": "测试模式",
@@ -304,7 +304,7 @@
     closeJumpPanel();
     var top = viewStack[viewStack.length - 1];
     elBtnBack.hidden = viewStack.length <= 1;
-    elTopTitle.textContent = VIEW_TITLES[top.view] || "AIF-C01 题库";
+    elTopTitle.textContent = VIEW_TITLES[top.view] || "AI Practitioner题库";
     updateLangButtons();
 
     var navButtons = elBottomNav.querySelectorAll(".nav-btn");

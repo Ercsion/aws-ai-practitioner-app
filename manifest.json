@@ -1,6 +1,6 @@
 {
-  "name": "AIF-C01 题库",
-  "short_name": "AIF-C01",
+  "name": "AI Practitioner题库",
+  "short_name": "AI Practitioner题库",
   "description": "AWS Certified AI Practitioner (AIF-C01) 题库背题与测试APP",
   "start_url": "./index.html",
   "scope": "./",
