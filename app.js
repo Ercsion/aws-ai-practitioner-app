@@ -21,7 +21,8 @@
       wrongIds: [],          // question ids ever answered wrong (current wrong book)
       progress: {},          // id -> { attempted: bool, correct: bool }
       fontIndex: DEFAULT_FONT_INDEX, // index into FONT_SCALES
-      quizSeqCursor: 1       // next question id to start from for sequential quizzes
+      quizSeqCursor: 1,      // next question id to start from for sequential quizzes
+      studyProgress: null    // { ids: [...], index: N } - last study mode position
     };
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
@@ -58,6 +59,32 @@
     var idx = state.wrongIds.indexOf(id);
     if (idx !== -1) state.wrongIds.splice(idx, 1);
     saveState();
+  }
+  function isInWrongBook(id) {
+    return state.wrongIds.indexOf(id) !== -1;
+  }
+  function toggleWrongBook(id) {
+    var idx = state.wrongIds.indexOf(id);
+    if (idx !== -1) {
+      state.wrongIds.splice(idx, 1);
+      saveState();
+      return false;
+    }
+    state.wrongIds.push(id);
+    saveState();
+    return true;
+  }
+  function saveStudyProgress(ids, index) {
+    state.studyProgress = { ids: ids, index: index };
+    saveState();
+  }
+  function tryResumeStudy() {
+    var sp = state.studyProgress;
+    if (!sp || !Array.isArray(sp.ids) || sp.ids.length === 0) return null;
+    var validIds = sp.ids.filter(function (id) { return !!questionById(id); });
+    if (validIds.length === 0) return null;
+    var idx = Math.min(sp.index || 0, validIds.length - 1);
+    return { ids: validIds, index: idx };
   }
 
   // ---------- DOM refs ----------
@@ -224,10 +251,22 @@
     if (!btn) return;
     var view = btn.getAttribute("data-view");
     if (view === "home") { goHome(); return; }
-    if (view === "study") { viewStack = [{ view: "home", opts: {} }, { view: "study-setup", opts: {} }]; render(); return; }
+    if (view === "study") { goToStudy(); return; }
     if (view === "quiz") { viewStack = [{ view: "home", opts: {} }, { view: "quiz-setup", opts: {} }]; render(); return; }
     if (view === "wrongbook") { viewStack = [{ view: "home", opts: {} }, { view: "wrongbook", opts: {} }]; render(); return; }
   });
+
+  // Opens study mode: resumes the last saved position automatically if one
+  // exists, otherwise shows the setup screen for a first-time start.
+  function goToStudy() {
+    var resume = tryResumeStudy();
+    if (resume) {
+      viewStack = [{ view: "home", opts: {} }, { view: "study", opts: resume }];
+    } else {
+      viewStack = [{ view: "home", opts: {} }, { view: "study-setup", opts: {} }];
+    }
+    render();
+  }
 
   // ---------- Utility ----------
   function escapeHtml(s) {
@@ -357,7 +396,9 @@
     elApp.innerHTML = html;
 
     elApp.querySelector('[data-action="go-study"]').addEventListener("click", function () {
-      navigate("study-setup");
+      var resume = tryResumeStudy();
+      if (resume) navigate("study", resume);
+      else navigate("study-setup");
     });
     elApp.querySelector('[data-action="go-quiz"]').addEventListener("click", function () {
       navigate("quiz-setup");
@@ -382,17 +423,33 @@
 
   // ---- Study setup ----
   function renderStudySetup() {
+    var resume = tryResumeStudy();
     var html = "";
-    html += '<div class="section-title">选择范围</div>';
+
+    if (resume) {
+      var resumeQ = questionById(resume.ids[resume.index]);
+      html += '<div class="section-title">继续上次学习</div>';
+      html += '<div class="setup-group">' +
+        setupRow("上次进度", "第 " + (resume.index + 1) + " / " + resume.ids.length + " 题 · 原题号 #" + resumeQ.id, "") +
+        "</div>";
+      html += '<button class="btn-primary" id="btn-resume-study">继续背题</button>';
+    }
+
+    html += '<div class="section-title">重新开始</div>';
     html += '<div class="setup-group">' +
       setupRow("从第几题开始", "共 " + TOTAL + " 题", '<input type="number" id="study-start" class="num-input" min="1" max="' + TOTAL + '" value="1" />') +
       setupRow("顺序", "", chipGroup("study-order", [["seq", "顺序"], ["random", "随机"]], "seq")) +
       "</div>";
 
-    html += '<button class="btn-primary" id="btn-start-study">开始背题</button>';
+    html += '<button class="' + (resume ? "btn-secondary" : "btn-primary") + '" id="btn-start-study">开始背题</button>';
 
     elApp.innerHTML = html;
     bindChipGroups(elApp);
+
+    var resumeBtn = elApp.querySelector("#btn-resume-study");
+    if (resumeBtn) resumeBtn.addEventListener("click", function () {
+      replaceView("study", { ids: resume.ids, index: resume.index });
+    });
 
     elApp.querySelector("#btn-start-study").addEventListener("click", function () {
       var startVal = parseInt(elApp.querySelector("#study-start").value, 10) || 1;
@@ -445,6 +502,10 @@
     var index = opts.index;
     var q = questionById(ids[index]);
 
+    saveStudyProgress(ids, index);
+
+    var inWrongBook = isInWrongBook(q.id);
+
     var html = "";
     html += '<div class="q-progress"><button class="q-progress-jump" id="btn-jump-progress">第 ' + (index + 1) + " / " + ids.length + " 题 &#9998;</button>" +
       '<span>原题号 #' + q.id + "</span></div>";
@@ -470,10 +531,16 @@
     html += "</div>";
     html += "</div>";
 
+    html += '<button class="btn-secondary mark-wrong-btn' + (inWrongBook ? " active" : "") + '" id="btn-toggle-wrong">' +
+      (inWrongBook ? "&#10003; 已加入错题本" : "&#9888; 标记为错题") +
+      "</button>";
+
     html += '<div class="nav-row">' +
       '<button class="btn-secondary" id="btn-prev" ' + (index === 0 ? "disabled" : "") + '>&#8592; 上一题</button>' +
       '<button class="btn-primary" id="btn-next" ' + (index === ids.length - 1 ? "disabled" : "") + '>下一题 &#8594;</button>' +
       "</div>";
+
+    html += '<button class="btn-secondary" id="btn-restart-study">重新设置背题范围</button>';
 
     elApp.innerHTML = html;
 
@@ -486,6 +553,11 @@
       if (index < ids.length - 1) replaceView("study", { ids: ids, index: index + 1 });
     });
 
+    var restartBtn = elApp.querySelector("#btn-restart-study");
+    if (restartBtn) restartBtn.addEventListener("click", function () {
+      navigate("study-setup");
+    });
+
     var jumpBtn = elApp.querySelector("#btn-jump-progress");
     if (jumpBtn) jumpBtn.addEventListener("click", function () {
       openJumpPanel(function (qid) {
@@ -496,6 +568,13 @@
         }
         replaceView("study", { ids: ids, index: newIndex });
       });
+    });
+
+    var toggleWrongBtn = elApp.querySelector("#btn-toggle-wrong");
+    if (toggleWrongBtn) toggleWrongBtn.addEventListener("click", function () {
+      var added = toggleWrongBook(q.id);
+      toast(added ? "已加入错题本" : "已从错题本移除");
+      replaceView("study", { ids: ids, index: index });
     });
   }
 
@@ -626,6 +705,13 @@
     }
     html += "</div>";
 
+    if (isSubmitted) {
+      var inWrongBookQuiz = isInWrongBook(q.id);
+      html += '<button class="btn-secondary mark-wrong-btn' + (inWrongBookQuiz ? " active" : "") + '" id="btn-toggle-wrong">' +
+        (inWrongBookQuiz ? "&#10003; 已加入错题本" : "&#9888; 标记为错题") +
+        "</button>";
+    }
+
     html += '<div class="nav-row">';
     html += '<button class="btn-secondary" id="btn-prev" ' + (index === 0 ? "disabled" : "") + '>&#8592; 上一题</button>';
     if (index === ids.length - 1) {
@@ -675,6 +761,12 @@
     var finishBtn = elApp.querySelector("#btn-finish");
     if (finishBtn) finishBtn.addEventListener("click", function () {
       replaceView("quiz-result", { ids: ids, answers: answers, submitted: submitted });
+    });
+    var toggleWrongBtn = elApp.querySelector("#btn-toggle-wrong");
+    if (toggleWrongBtn) toggleWrongBtn.addEventListener("click", function () {
+      var added = toggleWrongBook(q.id);
+      toast(added ? "已加入错题本" : "已从错题本移除");
+      replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq });
     });
   }
 

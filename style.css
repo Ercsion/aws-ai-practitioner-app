@@ -280,6 +280,17 @@ button {
   background: var(--red-bg);
 }
 
+.mark-wrong-btn {
+  color: var(--orange-dark);
+  border: 1px solid var(--orange);
+  background: #fff8ec;
+}
+.mark-wrong-btn.active {
+  color: var(--red);
+  border: 1px solid var(--red);
+  background: var(--red-bg);
+}
+
 /* ---------- Question card (shared study/quiz) ---------- */
 .q-progress {
   font-size: calc(12px * var(--font-scale));
