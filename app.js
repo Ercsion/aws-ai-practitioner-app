@@ -301,6 +301,259 @@
     return QUESTIONS.find(function (q) { return q.id === id; });
   }
 
+  // ---------- Question type helpers ----------
+  // qtype is omitted for regular single/multi-choice questions ("choice").
+  // "matching" and "ordering" are special AWS Skill Builder question types.
+  function isMatchingType(q) { return q.qtype === "matching"; }
+  function isOrderingType(q) { return q.qtype === "ordering"; }
+  function isChoiceType(q) { return !isMatchingType(q) && !isOrderingType(q); }
+
+  function matchingAnswerChoices(q) {
+    var seen = {};
+    var arr = [];
+    q.pairs.forEach(function (p) {
+      var key = p.answer.zh;
+      if (!seen[key]) {
+        seen[key] = true;
+        arr.push(p.answer);
+      }
+    });
+    return arr;
+  }
+
+  function arraysEqualInOrder(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+
+  // Generic correctness check across all question types. userAnswer format:
+  // choice    -> array of selected option labels
+  // matching  -> array of selected answer .zh strings, parallel to q.pairs
+  // ordering  -> array of item .zh strings in the user's chosen order
+  function isAnswerCorrect(q, userAnswer) {
+    if (isMatchingType(q)) {
+      if (!userAnswer) return false;
+      return q.pairs.every(function (p, i) { return userAnswer[i] === p.answer.zh; });
+    }
+    if (isOrderingType(q)) {
+      var correctOrder = q.items.map(function (it) { return it.zh; });
+      return arraysEqualInOrder(userAnswer, correctOrder);
+    }
+    return arraysEqualAsSets(userAnswer || [], q.correct.split(""));
+  }
+
+  function questionTypeBadge(q) {
+    if (isMatchingType(q)) return '<span class="q-multi-badge">配对题</span>';
+    if (isOrderingType(q)) return '<span class="q-multi-badge">排序题</span>';
+    if (q.multiple) return '<span class="q-multi-badge">多选</span>';
+    return "";
+  }
+
+  // Read-only reveal of the correct answer, used in study mode and wrongbook
+  // review where there's no interactive answering, just the answer shown.
+  function renderAnswerReveal(q) {
+    if (isMatchingType(q)) {
+      var html = '<div class="match-list">';
+      q.pairs.forEach(function (p) {
+        html += '<div class="match-row">' +
+          '<div class="match-statement">' + bilingualInline(p.statement.zh, p.statement.en) + "</div>" +
+          '<div class="match-arrow">&#8594;</div>' +
+          '<div class="match-answer correct">' + bilingualInline(p.answer.zh, p.answer.en) + "</div>" +
+          "</div>";
+      });
+      html += "</div>";
+      return html;
+    }
+    if (isOrderingType(q)) {
+      var html2 = '<div class="order-list">';
+      q.items.forEach(function (it, i) {
+        html2 += '<div class="order-row correct">' +
+          '<div class="order-num">' + (i + 1) + "</div>" +
+          '<div class="order-text">' + bilingualInline(it.zh, it.en) + "</div>" +
+          "</div>";
+      });
+      html2 += "</div>";
+      return html2;
+    }
+    // choice type
+    var html3 = '<div class="opt-list">';
+    q.options.zh.forEach(function (optZh, i) {
+      var optEn = q.options.en[i];
+      var isCorrect = q.correct.indexOf(optZh.label) !== -1;
+      html3 += '<div class="opt-item' + (isCorrect ? " correct" : "") + '">' +
+        '<div class="opt-mark">' + optZh.label + "</div>" +
+        '<div class="opt-text">' + bilingualInline(optZh.text, optEn.text) + "</div>" +
+        "</div>";
+    });
+    html3 += "</div>";
+    return html3;
+  }
+
+  // ---------- Interactive answer areas for quiz mode ----------
+  function renderChoiceAnswerArea(q, userAnswer, isSubmitted) {
+    var selected = userAnswer || [];
+    var html = '<div class="opt-list">';
+    q.options.zh.forEach(function (optZh, i) {
+      var optEn = q.options.en[i];
+      var label = optZh.label;
+      var classes = ["opt-item"];
+      if (!isSubmitted) classes.push("selectable");
+      if (isSubmitted) {
+        var isCorrectOpt = q.correct.indexOf(label) !== -1;
+        var wasSelected = selected.indexOf(label) !== -1;
+        if (isCorrectOpt) classes.push("correct");
+        else if (wasSelected) classes.push("incorrect");
+      } else if (selected.indexOf(label) !== -1) {
+        classes.push("selected");
+      }
+      html += '<div class="' + classes.join(" ") + '" data-label="' + label + '">' +
+        '<div class="opt-mark">' + label + "</div>" +
+        '<div class="opt-text">' + bilingualInline(optZh.text, optEn.text) + "</div>" +
+        "</div>";
+    });
+    html += "</div>";
+    return html;
+  }
+  function bindChoiceEvents(q, answers, rerender) {
+    elApp.querySelectorAll(".opt-item.selectable").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var label = el.getAttribute("data-label");
+        var cur = answers[q.id] || [];
+        if (q.multiple) {
+          var pos = cur.indexOf(label);
+          if (pos === -1) cur.push(label); else cur.splice(pos, 1);
+        } else {
+          cur = [label];
+        }
+        answers[q.id] = cur;
+        rerender();
+      });
+    });
+  }
+
+  // Matching: user picks an answer choice for each statement via a dropdown-
+  // like tap-to-select chip list per row.
+  function renderMatchingAnswerArea(q, userAnswer, isSubmitted) {
+    var choices = matchingAnswerChoices(q);
+    var sel = userAnswer || q.pairs.map(function () { return null; });
+    var html = '<div class="match-list">';
+    q.pairs.forEach(function (p, i) {
+      var picked = sel[i];
+      var isRowCorrect = isSubmitted && picked === p.answer.zh;
+      var isRowWrong = isSubmitted && picked !== p.answer.zh;
+      html += '<div class="match-qrow">';
+      html += '<div class="match-statement">' + bilingualInline(p.statement.zh, p.statement.en) + "</div>";
+      html += '<div class="match-choice-list">';
+      choices.forEach(function (choice) {
+        var isPicked = picked === choice.zh;
+        var classes = ["match-choice"];
+        if (!isSubmitted) {
+          if (isPicked) classes.push("selected");
+        } else {
+          var isCorrectChoice = choice.zh === p.answer.zh;
+          if (isCorrectChoice) classes.push("correct");
+          else if (isPicked) classes.push("incorrect");
+        }
+        html += '<button class="' + classes.join(" ") + '"' + (isSubmitted ? " disabled" : "") +
+          ' data-row="' + i + '" data-choice="' + escapeHtml(choice.zh) + '">' +
+          bilingualInline(choice.zh, choice.en) + "</button>";
+      });
+      html += "</div>";
+      if (isSubmitted && isRowWrong) {
+        html += '<div class="match-correct-hint">正确答案: ' + bilingualInline(p.answer.zh, p.answer.en) + "</div>";
+      }
+      html += "</div>";
+    });
+    html += "</div>";
+    return html;
+  }
+  function bindMatchingEvents(q, answers, rerender) {
+    if (!answers[q.id]) answers[q.id] = q.pairs.map(function () { return null; });
+    elApp.querySelectorAll(".match-choice:not([disabled])").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var row = parseInt(btn.getAttribute("data-row"), 10);
+        var choiceZh = btn.getAttribute("data-choice");
+        answers[q.id][row] = choiceZh;
+        rerender();
+      });
+    });
+  }
+
+  // Ordering: user builds a sequence by tapping items in the desired order;
+  // tapping a chosen item again removes it so they can re-pick.
+  function renderOrderingAnswerArea(q, userAnswer, isSubmitted) {
+    var chosen = userAnswer || [];
+    var correctOrder = q.items.map(function (it) { return it.zh; });
+    var html = "";
+
+    if (isSubmitted) {
+      html += '<div class="order-list">';
+      chosen.forEach(function (zh, i) {
+        var item = q.items.find(function (it) { return it.zh === zh; });
+        var isRight = correctOrder[i] === zh;
+        html += '<div class="order-row' + (isRight ? " correct" : " incorrect") + '">' +
+          '<div class="order-num">' + (i + 1) + "</div>" +
+          '<div class="order-text">' + bilingualInline(item.zh, item.en) + "</div>" +
+          "</div>";
+      });
+      html += "</div>";
+      html += '<div class="order-correct-hint"><div class="explain-title">正确顺序</div><div class="order-list">';
+      q.items.forEach(function (it, i) {
+        html += '<div class="order-row correct">' +
+          '<div class="order-num">' + (i + 1) + "</div>" +
+          '<div class="order-text">' + bilingualInline(it.zh, it.en) + "</div>" +
+          "</div>";
+      });
+      html += "</div></div>";
+      return html;
+    }
+
+    html += '<div class="order-progress-list">';
+    if (chosen.length === 0) {
+      html += '<div class="order-placeholder">点击下方选项，按顺序添加</div>';
+    } else {
+      chosen.forEach(function (zh, i) {
+        var item = q.items.find(function (it) { return it.zh === zh; });
+        html += '<div class="order-row selected" data-chosen-index="' + i + '">' +
+          '<div class="order-num">' + (i + 1) + "</div>" +
+          '<div class="order-text">' + bilingualInline(item.zh, item.en) + "</div>" +
+          '<div class="order-remove">&#10005;</div>' +
+          "</div>";
+      });
+    }
+    html += "</div>";
+
+    html += '<div class="order-bank">';
+    q.items.forEach(function (it) {
+      var isChosen = chosen.indexOf(it.zh) !== -1;
+      if (isChosen) return;
+      html += '<button class="order-bank-item" data-item="' + escapeHtml(it.zh) + '">' +
+        bilingualInline(it.zh, it.en) + "</button>";
+    });
+    html += "</div>";
+    return html;
+  }
+  function bindOrderingEvents(q, answers, rerender) {
+    if (!answers[q.id]) answers[q.id] = [];
+    elApp.querySelectorAll(".order-bank-item").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var itemZh = btn.getAttribute("data-item");
+        answers[q.id].push(itemZh);
+        rerender();
+      });
+    });
+    elApp.querySelectorAll(".order-row.selected").forEach(function (row) {
+      row.addEventListener("click", function () {
+        var idx = parseInt(row.getAttribute("data-chosen-index"), 10);
+        answers[q.id].splice(idx, 1);
+        rerender();
+      });
+    });
+  }
+
   // Renders bilingual text according to current lang setting.
   // Returns HTML string with a primary line and (if 'both') a secondary line.
   function bilingualBlock(zhText, enText, opts) {
@@ -512,19 +765,10 @@
 
     html += '<div class="q-card">';
     html += '<span class="q-num-badge">Q' + q.id + "</span>";
-    if (q.multiple) html += '<span class="q-multi-badge">多选</span>';
+    html += questionTypeBadge(q);
     html += bilingualBlock(q.stem.zh, q.stem.en, { primaryClass: "q-stem", secondaryClass: "q-stem secondary" });
 
-    html += '<div class="opt-list">';
-    q.options.zh.forEach(function (optZh, i) {
-      var optEn = q.options.en[i];
-      var isCorrect = q.correct.indexOf(optZh.label) !== -1;
-      html += '<div class="opt-item' + (isCorrect ? " correct" : "") + '">' +
-        '<div class="opt-mark">' + optZh.label + "</div>" +
-        '<div class="opt-text">' + bilingualInline(optZh.text, optEn.text) + "</div>" +
-        "</div>";
-    });
-    html += "</div>";
+    html += renderAnswerReveal(q);
 
     html += '<div class="explain-box"><div class="explain-title">解析</div>';
     html += bilingualBlock(q.explanation.zh || "（无）", q.explanation.en || "(none)", { primaryClass: "explain-text", secondaryClass: "explain-text secondary" });
@@ -650,16 +894,28 @@
     saveState();
   }
 
+  // Whether the user has provided a complete answer, ready to submit.
+  function isAnswerComplete(q, userAnswer) {
+    if (isMatchingType(q)) {
+      return !!userAnswer && userAnswer.length === q.pairs.length &&
+        userAnswer.every(function (v) { return !!v; });
+    }
+    if (isOrderingType(q)) {
+      return !!userAnswer && userAnswer.length === q.items.length;
+    }
+    return !!userAnswer && userAnswer.length > 0;
+  }
+
   // ---- Quiz mode ----
   function renderQuiz(opts) {
     var ids = opts.ids;
     var index = opts.index;
-    var answers = opts.answers; // id -> array of selected labels
+    var answers = opts.answers; // id -> answer (format depends on question type)
     var submitted = opts.submitted; // id -> true/false
     var isSeq = !!opts.seq;
 
     var q = questionById(ids[index]);
-    var selected = answers[q.id] || [];
+    var userAnswer = answers[q.id];
     var isSubmitted = !!submitted[q.id];
 
     var html = "";
@@ -668,36 +924,23 @@
 
     html += '<div class="q-card">';
     html += '<span class="q-num-badge">Q' + q.id + "</span>";
-    if (q.multiple) html += '<span class="q-multi-badge">多选 (' + q.correct.length + ")</span>";
+    html += questionTypeBadge(q);
     html += bilingualBlock(q.stem.zh, q.stem.en, { primaryClass: "q-stem", secondaryClass: "q-stem secondary" });
 
-    html += '<div class="opt-list">';
-    q.options.zh.forEach(function (optZh, i) {
-      var optEn = q.options.en[i];
-      var label = optZh.label;
-      var classes = ["opt-item"];
-      if (!isSubmitted) classes.push("selectable");
-      if (isSubmitted) {
-        var isCorrectOpt = q.correct.indexOf(label) !== -1;
-        var wasSelected = selected.indexOf(label) !== -1;
-        if (isCorrectOpt) classes.push("correct");
-        else if (wasSelected) classes.push("incorrect");
-      } else if (selected.indexOf(label) !== -1) {
-        classes.push("selected");
-      }
-      html += '<div class="' + classes.join(" ") + '" data-label="' + label + '">' +
-        '<div class="opt-mark">' + label + "</div>" +
-        '<div class="opt-text">' + bilingualInline(optZh.text, optEn.text) + "</div>" +
-        "</div>";
-    });
-    html += "</div>";
+    if (isMatchingType(q)) {
+      html += renderMatchingAnswerArea(q, userAnswer, isSubmitted);
+    } else if (isOrderingType(q)) {
+      html += renderOrderingAnswerArea(q, userAnswer, isSubmitted);
+    } else {
+      html += renderChoiceAnswerArea(q, userAnswer, isSubmitted);
+    }
 
     if (!isSubmitted) {
-      html += '<button class="btn-primary" id="btn-submit-answer"' + (selected.length === 0 ? " disabled" : "") + ">提交答案</button>";
+      html += '<button class="btn-primary" id="btn-submit-answer"' + (!isAnswerComplete(q, userAnswer) ? " disabled" : "") + ">提交答案</button>";
     } else {
-      var userCorrect = arraysEqualAsSets(selected, q.correct.split(""));
+      var userCorrect = isAnswerCorrect(q, userAnswer);
       html += '<div class="result-banner ' + (userCorrect ? "correct" : "incorrect") + '">' +
-        (userCorrect ? "&#10003; 回答正确" : "&#10007; 回答错误 · 正确答案: " + q.correct) +
+        (userCorrect ? "&#10003; 回答正确" : "&#10007; 回答错误") +
         "</div>";
       html += '<div class="explain-box"><div class="explain-title">解析</div>';
       html += bilingualBlock(q.explanation.zh || "（无）", q.explanation.en || "(none)", { primaryClass: "explain-text", secondaryClass: "explain-text secondary" });
@@ -723,30 +966,26 @@
 
     elApp.innerHTML = html;
 
+    function rerender() {
+      replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq });
+    }
+
     if (!isSubmitted) {
-      elApp.querySelectorAll(".opt-item.selectable").forEach(function (el) {
-        el.addEventListener("click", function () {
-          var label = el.getAttribute("data-label");
-          var cur = answers[q.id] || [];
-          if (q.multiple) {
-            var pos = cur.indexOf(label);
-            if (pos === -1) cur.push(label); else cur.splice(pos, 1);
-          } else {
-            cur = [label];
-          }
-          answers[q.id] = cur;
-          replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq });
-        });
-      });
+      if (isMatchingType(q)) {
+        bindMatchingEvents(q, answers, rerender);
+      } else if (isOrderingType(q)) {
+        bindOrderingEvents(q, answers, rerender);
+      } else {
+        bindChoiceEvents(q, answers, rerender);
+      }
 
       var submitBtn = elApp.querySelector("#btn-submit-answer");
       if (submitBtn) submitBtn.addEventListener("click", function () {
         submitted[q.id] = true;
-        var correctSet = q.correct.split("");
-        var isRight = arraysEqualAsSets(answers[q.id] || [], correctSet);
+        var isRight = isAnswerCorrect(q, answers[q.id]);
         if (isRight) markCorrect(q.id); else markWrong(q.id);
         if (isSeq) advanceSeqCursor(q.id);
-        replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq });
+        rerender();
       });
     }
 
@@ -788,7 +1027,7 @@
     var wrongList = [];
     ids.forEach(function (id) {
       var q = questionById(id);
-      var isRight = arraysEqualAsSets(answers[id] || [], q.correct.split(""));
+      var isRight = isAnswerCorrect(q, answers[id]);
       if (isRight) correctCount++;
       else wrongList.push(id);
     });
@@ -894,19 +1133,10 @@
 
     html += '<div class="q-card">';
     html += '<span class="q-num-badge">Q' + q.id + "</span>";
-    if (q.multiple) html += '<span class="q-multi-badge">多选</span>';
+    html += questionTypeBadge(q);
     html += bilingualBlock(q.stem.zh, q.stem.en, { primaryClass: "q-stem", secondaryClass: "q-stem secondary" });
 
-    html += '<div class="opt-list">';
-    q.options.zh.forEach(function (optZh, i) {
-      var optEn = q.options.en[i];
-      var isCorrect = q.correct.indexOf(optZh.label) !== -1;
-      html += '<div class="opt-item' + (isCorrect ? " correct" : "") + '">' +
-        '<div class="opt-mark">' + optZh.label + "</div>" +
-        '<div class="opt-text">' + bilingualInline(optZh.text, optEn.text) + "</div>" +
-        "</div>";
-    });
-    html += "</div>";
+    html += renderAnswerReveal(q);
 
     html += '<div class="explain-box"><div class="explain-title">解析</div>';
     html += bilingualBlock(q.explanation.zh || "（无）", q.explanation.en || "(none)", { primaryClass: "explain-text", secondaryClass: "explain-text secondary" });
