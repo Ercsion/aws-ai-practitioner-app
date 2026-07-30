@@ -158,6 +158,28 @@
 
   elBtnFontSize.addEventListener("click", openFontSizePanel);
 
+  // ---------- App update banner ----------
+  // Called by index.html's service worker registration code when a new
+  // version has been installed and is ready to activate.
+  window.__showUpdateBanner = function (registration) {
+    if (document.getElementById("update-banner")) return;
+    var bar = document.createElement("div");
+    bar.id = "update-banner";
+    bar.className = "update-banner";
+    bar.innerHTML =
+      '<span class="update-banner-text">发现新版本</span>' +
+      '<button class="update-banner-btn" id="update-banner-btn">立即更新</button>';
+    document.body.appendChild(bar);
+    requestAnimationFrame(function () { bar.classList.add("show"); });
+
+    document.getElementById("update-banner-btn").addEventListener("click", function () {
+      if (registration.waiting) {
+        registration.waiting.postMessage("SKIP_WAITING");
+      }
+      bar.querySelector(".update-banner-btn").textContent = "更新中…";
+    });
+  };
+
   // ---------- Jump-to-question panel (reused by study mode progress bar) ----------
   function openJumpPanel(onJump) {
     if (elOverlayRoot.querySelector(".jump-panel")) return;

@@ -49,11 +49,41 @@
   <script src="questions-data.js"></script>
   <script src="app.js"></script>
   <script>
-    // Register service worker for offline/installable support.
+    // Register service worker for offline/installable support, and wire up
+    // an update-available prompt (see app.js: window.__showUpdateBanner).
     // Requires HTTPS or localhost; silently no-ops on plain file:// or HTTP hosting.
     if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
       window.addEventListener("load", function () {
-        navigator.serviceWorker.register("sw.js").catch(function () { /* ignore */ });
+        navigator.serviceWorker.register("sw.js").then(function (reg) {
+          // A new worker installed while an old one is already controlling
+          // the page: a real update is available.
+          function handleNewWorker(worker) {
+            worker.addEventListener("statechange", function () {
+              if (worker.state === "installed" && navigator.serviceWorker.controller) {
+                if (window.__showUpdateBanner) window.__showUpdateBanner(reg);
+              }
+            });
+          }
+          if (reg.waiting && navigator.serviceWorker.controller) {
+            if (window.__showUpdateBanner) window.__showUpdateBanner(reg);
+          }
+          if (reg.installing) handleNewWorker(reg.installing);
+          reg.addEventListener("updatefound", function () {
+            if (reg.installing) handleNewWorker(reg.installing);
+          });
+
+          // Reload once the new worker takes control, so the page picks up
+          // the latest app.js/questions-data.js.
+          var reloaded = false;
+          navigator.serviceWorker.addEventListener("controllerchange", function () {
+            if (reloaded) return;
+            reloaded = true;
+            window.location.reload();
+          });
+
+          // Periodically check for a new version while the app is open.
+          setInterval(function () { reg.update().catch(function () {}); }, 60 * 1000);
+        }).catch(function () { /* ignore */ });
       });
     }
   </script>
