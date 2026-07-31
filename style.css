@@ -91,6 +91,28 @@ button {
   text-overflow: ellipsis;
 }
 
+.exam-switch-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  background: rgba(255,255,255,0.12);
+  border: 1.5px solid rgba(255,255,255,0.3);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 700;
+  max-width: 96px;
+}
+.exam-switch-btn:active { background: rgba(255,255,255,0.22); }
+.exam-switch-btn span#exam-switch-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.exam-switch-caret { flex: 0 0 auto; font-size: 10px; opacity: 0.85; }
+
 .seg-control {
   display: flex;
   background: rgba(255,255,255,0.12);
@@ -767,3 +789,31 @@ button {
   border-radius: 999px;
 }
 .update-banner-btn:active { background: var(--orange-dark); }
+
+/* ---------- Exam switcher panel ---------- */
+.exam-panel { max-width: 420px; }
+.exam-option-list { display: flex; flex-direction: column; gap: 8px; }
+.exam-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  text-align: left;
+}
+.exam-option.active { border-color: var(--orange); background: #fff8ec; }
+.exam-option-name {
+  font-size: calc(14px * var(--font-scale));
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.35;
+}
+.exam-option-sub {
+  font-size: calc(12px * var(--font-scale));
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+.exam-option-check { flex: 0 0 auto; color: var(--orange-dark); font-weight: 700; font-size: 16px; }

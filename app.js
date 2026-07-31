@@ -4,9 +4,32 @@
 (function () {
   "use strict";
 
-  var QUESTIONS = window.QUESTIONS || [];
-  var TOTAL = QUESTIONS.length;
+  var ALL_QUESTIONS = window.QUESTIONS || [];
   var STORAGE_KEY = "aif_app_state_v1";
+
+  // ---------- Exams ----------
+  // Each exam is a distinct question bank the user can switch between from
+  // the top bar. "exam" on a question record ties it to one of these ids.
+  var EXAMS = [
+    { id: "AIF-C01", name: "AWS Certified AI Practitioner", shortName: "AIF-C01" },
+    { id: "AIP-C01", name: "AWS Certified Generative AI Developer – Professional", shortName: "AIP-C01" }
+  ];
+  var DEFAULT_EXAM_ID = "AIF-C01";
+
+  function examById(id) {
+    return EXAMS.find(function (e) { return e.id === id; }) || EXAMS[0];
+  }
+
+  // QUESTIONS/TOTAL are recomputed whenever the active exam changes (see
+  // setExam below). Declared here so all existing code referencing them
+  // keeps working without further changes.
+  var QUESTIONS = [];
+  var TOTAL = 0;
+  function refreshExamQuestions() {
+    var examId = state.exam || DEFAULT_EXAM_ID;
+    QUESTIONS = ALL_QUESTIONS.filter(function (q) { return (q.exam || DEFAULT_EXAM_ID) === examId; });
+    TOTAL = QUESTIONS.length;
+  }
 
   var FONT_SCALES = [0.85, 1, 1.15, 1.3, 1.45];
   var FONT_LABELS = ["小", "标准", "大", "较大", "特大"];
@@ -15,23 +38,45 @@
   // ---------- Persistent state ----------
   var state = loadState();
 
+  // Per-exam progress/wrongbook/etc, keyed by exam id. Global settings like
+  // lang and fontIndex are shared across exams; study/quiz progress is not,
+  // since question ids are only meaningful within their own exam's bank.
+  function defaultExamState() {
+    return {
+      wrongIds: [],          // question ids ever answered wrong (current wrong book)
+      progress: {},          // id -> { attempted: bool, correct: bool }
+      quizSeqCursor: 1,      // next question id to start from for sequential quizzes
+      studyProgress: null    // { ids: [...], index: N } - last study mode position
+    };
+  }
+
   function loadState() {
     var defaults = {
       lang: "both",          // 'zh' | 'en' | 'both'
-      wrongIds: [],          // question ids ever answered wrong (current wrong book)
-      progress: {},          // id -> { attempted: bool, correct: bool }
       fontIndex: DEFAULT_FONT_INDEX, // index into FONT_SCALES
-      quizSeqCursor: 1,      // next question id to start from for sequential quizzes
-      studyProgress: null    // { ids: [...], index: N } - last study mode position
+      exam: DEFAULT_EXAM_ID,  // currently selected exam id
+      examState: {}           // exam id -> defaultExamState() shape
     };
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return defaults;
       var parsed = JSON.parse(raw);
-      return Object.assign(defaults, parsed);
+      var merged = Object.assign(defaults, parsed);
+      if (!merged.examState) merged.examState = {};
+      return merged;
     } catch (e) {
       return defaults;
     }
+  }
+
+  // Returns (creating if needed) the per-exam state bucket for the
+  // currently active exam.
+  function currentExamState() {
+    var examId = state.exam || DEFAULT_EXAM_ID;
+    if (!state.examState[examId]) {
+      state.examState[examId] = defaultExamState();
+    }
+    return state.examState[examId];
   }
 
   function saveState() {
@@ -41,50 +86,60 @@
   }
 
   function markWrong(id) {
-    if (state.wrongIds.indexOf(id) === -1) state.wrongIds.push(id);
-    state.progress[id] = { attempted: true, correct: false };
+    var es = currentExamState();
+    if (es.wrongIds.indexOf(id) === -1) es.wrongIds.push(id);
+    es.progress[id] = { attempted: true, correct: false };
     saveState();
   }
   function markCorrect(id) {
-    var idx = state.wrongIds.indexOf(id);
-    if (idx !== -1) state.wrongIds.splice(idx, 1);
-    state.progress[id] = { attempted: true, correct: true };
+    var es = currentExamState();
+    var idx = es.wrongIds.indexOf(id);
+    if (idx !== -1) es.wrongIds.splice(idx, 1);
+    es.progress[id] = { attempted: true, correct: true };
     saveState();
   }
   function clearWrongBook() {
-    state.wrongIds = [];
+    currentExamState().wrongIds = [];
     saveState();
   }
   function removeFromWrongBook(id) {
-    var idx = state.wrongIds.indexOf(id);
-    if (idx !== -1) state.wrongIds.splice(idx, 1);
+    var es = currentExamState();
+    var idx = es.wrongIds.indexOf(id);
+    if (idx !== -1) es.wrongIds.splice(idx, 1);
     saveState();
   }
   function isInWrongBook(id) {
-    return state.wrongIds.indexOf(id) !== -1;
+    return currentExamState().wrongIds.indexOf(id) !== -1;
   }
   function toggleWrongBook(id) {
-    var idx = state.wrongIds.indexOf(id);
+    var es = currentExamState();
+    var idx = es.wrongIds.indexOf(id);
     if (idx !== -1) {
-      state.wrongIds.splice(idx, 1);
+      es.wrongIds.splice(idx, 1);
       saveState();
       return false;
     }
-    state.wrongIds.push(id);
+    es.wrongIds.push(id);
     saveState();
     return true;
   }
   function saveStudyProgress(ids, index) {
-    state.studyProgress = { ids: ids, index: index };
+    currentExamState().studyProgress = { ids: ids, index: index };
     saveState();
   }
   function tryResumeStudy() {
-    var sp = state.studyProgress;
+    var sp = currentExamState().studyProgress;
     if (!sp || !Array.isArray(sp.ids) || sp.ids.length === 0) return null;
     var validIds = sp.ids.filter(function (id) { return !!questionById(id); });
     if (validIds.length === 0) return null;
     var idx = Math.min(sp.index || 0, validIds.length - 1);
     return { ids: validIds, index: idx };
+  }
+  function setExam(examId) {
+    if (state.exam === examId) return;
+    state.exam = examId;
+    saveState();
+    refreshExamQuestions();
   }
 
   // ---------- DOM refs ----------
@@ -158,6 +213,65 @@
 
   elBtnFontSize.addEventListener("click", openFontSizePanel);
 
+  // ---------- Exam switcher ----------
+  var elBtnExamSwitch = document.getElementById("btn-exam-switch");
+  var elExamSwitchLabel = document.getElementById("exam-switch-label");
+
+  function updateExamLabel() {
+    elExamSwitchLabel.textContent = examById(state.exam || DEFAULT_EXAM_ID).shortName;
+  }
+
+  function openExamSwitchPanel() {
+    if (elOverlayRoot.querySelector(".exam-panel")) return;
+    var backdrop = document.createElement("div");
+    backdrop.className = "overlay-backdrop";
+    backdrop.addEventListener("click", closeExamSwitchPanel);
+
+    var panel = document.createElement("div");
+    panel.className = "font-size-panel exam-panel";
+    panel.addEventListener("click", function (e) { e.stopPropagation(); });
+
+    var activeExamId = state.exam || DEFAULT_EXAM_ID;
+    var html = '<div class="fsp-title">选择考试</div><div class="exam-option-list">';
+    EXAMS.forEach(function (exam) {
+      var count = ALL_QUESTIONS.filter(function (q) { return (q.exam || DEFAULT_EXAM_ID) === exam.id; }).length;
+      var isActive = exam.id === activeExamId;
+      html += '<button class="exam-option' + (isActive ? " active" : "") + '" data-exam-id="' + exam.id + '">' +
+        '<div class="exam-option-main">' +
+        '<div class="exam-option-name">' + escapeHtml(exam.name) + "</div>" +
+        '<div class="exam-option-sub">' + escapeHtml(exam.shortName) + " · " + count + " 题</div>" +
+        "</div>" +
+        (isActive ? '<div class="exam-option-check">&#10003;</div>' : "") +
+        "</button>";
+    });
+    html += "</div>";
+    panel.innerHTML = html;
+
+    elOverlayRoot.appendChild(backdrop);
+    elOverlayRoot.appendChild(panel);
+
+    panel.querySelectorAll(".exam-option").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var examId = btn.getAttribute("data-exam-id");
+        closeExamSwitchPanel();
+        if (examId !== (state.exam || DEFAULT_EXAM_ID)) {
+          setExam(examId);
+          updateExamLabel();
+          goHome();
+          toast("已切换到 " + examById(examId).shortName);
+        }
+      });
+    });
+  }
+  function closeExamSwitchPanel() {
+    var backdrop = elOverlayRoot.querySelector(".overlay-backdrop");
+    var panel = elOverlayRoot.querySelector(".exam-panel");
+    if (backdrop) backdrop.remove();
+    if (panel) panel.remove();
+  }
+
+  elBtnExamSwitch.addEventListener("click", openExamSwitchPanel);
+
   // ---------- App update banner ----------
   // Called by index.html's service worker registration code when a new
   // version has been installed and is ready to activate.
@@ -180,9 +294,22 @@
     });
   };
 
+  // Question ids are not guaranteed to be a contiguous 1..TOTAL range once
+  // multiple exams share the same underlying array (e.g. AIP-C01 ids start
+  // at 503, not 1). These helpers give the real min/max id for the exam
+  // that's currently active, used for input bounds and validation.
+  function examMinId() {
+    return QUESTIONS.reduce(function (min, q) { return Math.min(min, q.id); }, Infinity);
+  }
+  function examMaxId() {
+    return QUESTIONS.reduce(function (max, q) { return Math.max(max, q.id); }, -Infinity);
+  }
+
   // ---------- Jump-to-question panel (reused by study mode progress bar) ----------
   function openJumpPanel(onJump) {
     if (elOverlayRoot.querySelector(".jump-panel")) return;
+    var minId = examMinId();
+    var maxId = examMaxId();
     var backdrop = document.createElement("div");
     backdrop.className = "overlay-backdrop";
     backdrop.addEventListener("click", closeJumpPanel);
@@ -194,7 +321,7 @@
     panel.innerHTML =
       '<div class="fsp-title">跳转到题目</div>' +
       '<div class="jump-row">' +
-      '<input type="number" id="jump-input" class="num-input" min="1" max="' + TOTAL + '" placeholder="1-' + TOTAL + '" />' +
+      '<input type="number" id="jump-input" class="num-input" min="' + minId + '" max="' + maxId + '" placeholder="' + minId + '-' + maxId + '" />' +
       '<button class="btn-primary jump-go-btn" id="jump-go">跳转</button>' +
       "</div>";
 
@@ -210,8 +337,8 @@
 
     function doJump() {
       var val = parseInt(input.value, 10);
-      if (!val || val < 1 || val > TOTAL) {
-        toast("请输入 1-" + TOTAL + " 之间的题号");
+      if (!val || val < minId || val > maxId) {
+        toast("请输入 " + minId + "-" + maxId + " 之间的题号");
         return;
       }
       closeJumpPanel();
@@ -616,6 +743,7 @@
   function render() {
     closeFontSizePanel();
     closeJumpPanel();
+    closeExamSwitchPanel();
     var top = viewStack[viewStack.length - 1];
     elBtnBack.hidden = viewStack.length <= 1;
     elTopTitle.textContent = VIEW_TITLES[top.view] || "AI Practitioner题库";
@@ -649,12 +777,14 @@
 
   // ---- Home ----
   function renderHome() {
-    var attemptedIds = Object.keys(state.progress);
-    var correctCount = attemptedIds.filter(function (id) { return state.progress[id].correct; }).length;
-    var wrongCount = state.wrongIds.length;
+    var es = currentExamState();
+    var attemptedIds = Object.keys(es.progress);
+    var correctCount = attemptedIds.filter(function (id) { return es.progress[id].correct; }).length;
+    var wrongCount = es.wrongIds.length;
+    var exam = examById(state.exam || DEFAULT_EXAM_ID);
 
     var html = "";
-    html += '<div class="home-hero"><h2>AWS AI Practitioner (AIF-C01)</h2>' +
+    html += '<div class="home-hero"><h2>' + escapeHtml(exam.name) + "</h2>" +
       "<p>共 " + TOTAL + " 题 · 支持背题与测试两种模式</p></div>";
 
     html += '<div class="stat-row">' +
@@ -710,9 +840,12 @@
       html += '<button class="btn-primary" id="btn-resume-study">继续背题</button>';
     }
 
+    var minId = examMinId();
+    var maxId = examMaxId();
+
     html += '<div class="section-title">重新开始</div>';
     html += '<div class="setup-group">' +
-      setupRow("从第几题开始", "共 " + TOTAL + " 题", '<input type="number" id="study-start" class="num-input" min="1" max="' + TOTAL + '" value="1" />') +
+      setupRow("从第几题开始", "题号范围 " + minId + "-" + maxId, '<input type="number" id="study-start" class="num-input" min="' + minId + '" max="' + maxId + '" value="' + minId + '" />') +
       setupRow("顺序", "", chipGroup("study-order", [["seq", "顺序"], ["random", "随机"]], "seq")) +
       "</div>";
 
@@ -727,8 +860,8 @@
     });
 
     elApp.querySelector("#btn-start-study").addEventListener("click", function () {
-      var startVal = parseInt(elApp.querySelector("#study-start").value, 10) || 1;
-      startVal = Math.min(Math.max(startVal, 1), TOTAL);
+      var startVal = parseInt(elApp.querySelector("#study-start").value, 10) || minId;
+      startVal = Math.min(Math.max(startVal, minId), maxId);
       var order = getChipValue(elApp, "study-order");
       var ids = QUESTIONS.map(function (q) { return q.id; });
       if (order === "random") {
@@ -846,7 +979,9 @@
 
   // ---- Quiz setup ----
   function renderQuizSetup() {
-    var resumeId = clampSeqCursor(state.quizSeqCursor);
+    var minId = examMinId();
+    var maxId = examMaxId();
+    var resumeId = clampSeqCursor(currentExamState().quizSeqCursor, minId, maxId);
     var html = "";
     html += '<div class="section-title">测试设置</div>';
     html += '<div class="setup-group">' +
@@ -855,7 +990,7 @@
       setupRow("题目顺序", "", chipGroup("quiz-order", [["random", "随机"], ["seq", "顺序"]], "random")) +
       '<div class="setup-row" id="quiz-seq-start-row"><div><div class="lbl">顺序起始题号</div>' +
       '<div class="sub">顺序模式将从此题号接续开始</div></div>' +
-      '<input type="number" id="quiz-seq-start" class="num-input" min="1" max="' + TOTAL + '" value="' + resumeId + '" /></div>' +
+      '<input type="number" id="quiz-seq-start" class="num-input" min="' + minId + '" max="' + maxId + '" value="' + resumeId + '" /></div>' +
       "</div>";
     html += '<button class="btn-primary" id="btn-start-quiz">开始测试</button>';
 
@@ -887,9 +1022,9 @@
       var ids = QUESTIONS.map(function (q) { return q.id; });
       var isSeq = order === "seq";
       if (isSeq) {
-        var startId = parseInt(seqStartInput.value, 10) || 1;
-        startId = Math.min(Math.max(startId, 1), TOTAL);
-        state.quizSeqCursor = startId;
+        var startId = parseInt(seqStartInput.value, 10) || minId;
+        startId = Math.min(Math.max(startId, minId), maxId);
+        currentExamState().quizSeqCursor = startId;
         saveState();
         // Resume sequential order from the chosen starting question.
         ids = ids.filter(function (id) { return id >= startId; }).concat(ids.filter(function (id) { return id < startId; }));
@@ -905,14 +1040,18 @@
     });
   }
 
-  function clampSeqCursor(id) {
-    if (!id || id < 1 || id > TOTAL) return 1;
+  function clampSeqCursor(id, minId, maxId) {
+    if (minId === undefined) minId = examMinId();
+    if (maxId === undefined) maxId = examMaxId();
+    if (!id || id < minId || id > maxId) return minId;
     return id;
   }
   function advanceSeqCursor(id) {
+    var minId = examMinId();
+    var maxId = examMaxId();
     var next = id + 1;
-    if (next > TOTAL) next = 1;
-    state.quizSeqCursor = next;
+    if (next > maxId) next = minId;
+    currentExamState().quizSeqCursor = next;
     saveState();
   }
 
@@ -1097,7 +1236,7 @@
 
   // ---- Wrong book list ----
   function renderWrongbook() {
-    var ids = state.wrongIds.slice();
+    var ids = currentExamState().wrongIds.slice();
     var html = "";
     html += '<div class="stat-row">' + statBox(ids.length, "错题数量") + "</div>";
 
@@ -1194,7 +1333,9 @@
   }
 
   // ---------- Boot ----------
+  refreshExamQuestions();
   applyFontScale();
+  updateExamLabel();
   viewStack = [{ view: "home", opts: {} }];
   render();
 })();
