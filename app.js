@@ -63,6 +63,27 @@
       var parsed = JSON.parse(raw);
       var merged = Object.assign(defaults, parsed);
       if (!merged.examState) merged.examState = {};
+      // Migration: versions before the multi-exam feature stored
+      // wrongIds/progress/quizSeqCursor/studyProgress directly on the root
+      // state object (there was only ever one exam, AIF-C01). If we see
+      // any of those old flat fields and there's no migrated data for
+      // AIF-C01 yet, move them into examState so existing users don't
+      // lose their study/quiz progress and wrong book after this update.
+      var hasOldFlatData = parsed && (parsed.wrongIds || parsed.progress || parsed.quizSeqCursor || parsed.studyProgress);
+      if (hasOldFlatData && !merged.examState[DEFAULT_EXAM_ID]) {
+        merged.examState[DEFAULT_EXAM_ID] = {
+          wrongIds: parsed.wrongIds || [],
+          progress: parsed.progress || {},
+          quizSeqCursor: parsed.quizSeqCursor || 1,
+          studyProgress: parsed.studyProgress || null
+        };
+      }
+      // Clean up the stale root-level copies now that they've been (or
+      // never needed to be) migrated, so they don't shadow anything later.
+      delete merged.wrongIds;
+      delete merged.progress;
+      delete merged.quizSeqCursor;
+      delete merged.studyProgress;
       return merged;
     } catch (e) {
       return defaults;
