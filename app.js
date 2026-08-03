@@ -306,10 +306,15 @@
   }
 
   // ---------- Jump-to-question panel (reused by study mode progress bar) ----------
+  // The panel is display-number-facing: users type the number printed on
+  // the question card (Q1, Q2, ... which may skip a few values for exams
+  // like AIP-C01 where some source questions were dropped), not the
+  // internal id used for storage/lookup. We resolve the typed display
+  // number back to the matching question's internal id before jumping.
   function openJumpPanel(onJump) {
     if (elOverlayRoot.querySelector(".jump-panel")) return;
-    var minId = examMinId();
-    var maxId = examMaxId();
+    var minNum = QUESTIONS.reduce(function (min, q) { return Math.min(min, displayQNum(q)); }, Infinity);
+    var maxNum = QUESTIONS.reduce(function (max, q) { return Math.max(max, displayQNum(q)); }, -Infinity);
     var backdrop = document.createElement("div");
     backdrop.className = "overlay-backdrop";
     backdrop.addEventListener("click", closeJumpPanel);
@@ -321,7 +326,7 @@
     panel.innerHTML =
       '<div class="fsp-title">跳转到题目</div>' +
       '<div class="jump-row">' +
-      '<input type="number" id="jump-input" class="num-input" min="' + minId + '" max="' + maxId + '" placeholder="' + minId + '-' + maxId + '" />' +
+      '<input type="number" id="jump-input" class="num-input" min="' + minNum + '" max="' + maxNum + '" placeholder="' + minNum + '-' + maxNum + '" />' +
       '<button class="btn-primary jump-go-btn" id="jump-go">跳转</button>' +
       "</div>";
 
@@ -337,12 +342,13 @@
 
     function doJump() {
       var val = parseInt(input.value, 10);
-      if (!val || val < minId || val > maxId) {
-        toast("请输入 " + minId + "-" + maxId + " 之间的题号");
+      var target = QUESTIONS.find(function (q) { return displayQNum(q) === val; });
+      if (!val || !target) {
+        toast("请输入 " + minNum + "-" + maxNum + " 之间的题号");
         return;
       }
       closeJumpPanel();
-      onJump(val);
+      onJump(target.id);
     }
   }
   function closeJumpPanel() {
@@ -448,6 +454,15 @@
 
   function questionById(id) {
     return QUESTIONS.find(function (q) { return q.id === id; });
+  }
+
+  // Display-facing question number. Most questions use their internal id
+  // directly, but some (e.g. AIP-C01, whose ids were renumbered to a shared
+  // 503+ range because a few source questions were skipped) carry an
+  // explicit "num" field with the original source question number, which
+  // should be shown instead so it lines up with the source material.
+  function displayQNum(q) {
+    return (q && q.num != null) ? q.num : q.id;
   }
 
   // ---------- Question type helpers ----------
@@ -835,17 +850,21 @@
       var resumeQ = questionById(resume.ids[resume.index]);
       html += '<div class="section-title">继续上次学习</div>';
       html += '<div class="setup-group">' +
-        setupRow("上次进度", "第 " + (resume.index + 1) + " / " + resume.ids.length + " 题 · 原题号 #" + resumeQ.id, "") +
+        setupRow("上次进度", "第 " + (resume.index + 1) + " / " + resume.ids.length + " 题 · 原题号 #" + displayQNum(resumeQ), "") +
         "</div>";
       html += '<button class="btn-primary" id="btn-resume-study">继续背题</button>';
     }
 
-    var minId = examMinId();
-    var maxId = examMaxId();
+    // The "start from question #" input is display-number-facing (matches
+    // the number printed on the card), not the internal id. For exams
+    // where a few source questions were dropped (e.g. AIP-C01), display
+    // numbers have gaps while ids stay contiguous, so these ranges differ.
+    var minNum = QUESTIONS.reduce(function (min, q) { return Math.min(min, displayQNum(q)); }, Infinity);
+    var maxNum = QUESTIONS.reduce(function (max, q) { return Math.max(max, displayQNum(q)); }, -Infinity);
 
     html += '<div class="section-title">重新开始</div>';
     html += '<div class="setup-group">' +
-      setupRow("从第几题开始", "题号范围 " + minId + "-" + maxId, '<input type="number" id="study-start" class="num-input" min="' + minId + '" max="' + maxId + '" value="' + minId + '" />') +
+      setupRow("从第几题开始", "题号范围 " + minNum + "-" + maxNum, '<input type="number" id="study-start" class="num-input" min="' + minNum + '" max="' + maxNum + '" value="' + minNum + '" />') +
       setupRow("顺序", "", chipGroup("study-order", [["seq", "顺序"], ["random", "随机"]], "seq")) +
       "</div>";
 
@@ -860,14 +879,20 @@
     });
 
     elApp.querySelector("#btn-start-study").addEventListener("click", function () {
-      var startVal = parseInt(elApp.querySelector("#study-start").value, 10) || minId;
-      startVal = Math.min(Math.max(startVal, minId), maxId);
+      var startNum = parseInt(elApp.querySelector("#study-start").value, 10) || minNum;
+      startNum = Math.min(Math.max(startNum, minNum), maxNum);
+      // Resolve the typed display number to the closest question at or
+      // after it (in display-number order), in case the exact number was
+      // skipped in the source material.
+      var sortedByNum = QUESTIONS.slice().sort(function (a, b) { return displayQNum(a) - displayQNum(b); });
+      var startQ = sortedByNum.find(function (q) { return displayQNum(q) >= startNum; }) || sortedByNum[0];
+      var startId = startQ.id;
       var order = getChipValue(elApp, "study-order");
-      var ids = QUESTIONS.map(function (q) { return q.id; });
+      var ids = sortedByNum.map(function (q) { return q.id; });
       if (order === "random") {
         ids = shuffle(ids);
       } else {
-        ids = ids.filter(function (id) { return id >= startVal; }).concat(ids.filter(function (id) { return id < startVal; }));
+        ids = ids.filter(function (id) { return id >= startId; }).concat(ids.filter(function (id) { return id < startId; }));
       }
       replaceView("study", { ids: ids, index: 0 });
     });
@@ -916,10 +941,10 @@
 
     var html = "";
     html += '<div class="q-progress"><button class="q-progress-jump" id="btn-jump-progress">第 ' + (index + 1) + " / " + ids.length + " 题 &#9998;</button>" +
-      '<span>原题号 #' + q.id + "</span></div>";
+      '<span>原题号 #' + displayQNum(q) + "</span></div>";
 
     html += '<div class="q-card">';
-    html += '<span class="q-num-badge">Q' + q.id + "</span>";
+    html += '<span class="q-num-badge">Q' + displayQNum(q) + "</span>";
     html += questionTypeBadge(q);
     html += bilingualBlock(q.stem.zh, q.stem.en, { primaryClass: "q-stem", secondaryClass: "q-stem secondary" });
 
@@ -982,6 +1007,12 @@
     var minId = examMinId();
     var maxId = examMaxId();
     var resumeId = clampSeqCursor(currentExamState().quizSeqCursor, minId, maxId);
+    // "顺序起始题号" is display-number-facing, same reasoning as study setup.
+    var sortedByNumSetup = QUESTIONS.slice().sort(function (a, b) { return displayQNum(a) - displayQNum(b); });
+    var minNum = displayQNum(sortedByNumSetup[0]);
+    var maxNum = displayQNum(sortedByNumSetup[sortedByNumSetup.length - 1]);
+    var resumeQForSeq = questionById(resumeId);
+    var resumeNum = resumeQForSeq ? displayQNum(resumeQForSeq) : minNum;
     var html = "";
     html += '<div class="section-title">测试设置</div>';
     html += '<div class="setup-group">' +
@@ -990,7 +1021,7 @@
       setupRow("题目顺序", "", chipGroup("quiz-order", [["random", "随机"], ["seq", "顺序"]], "random")) +
       '<div class="setup-row" id="quiz-seq-start-row"><div><div class="lbl">顺序起始题号</div>' +
       '<div class="sub">顺序模式将从此题号接续开始</div></div>' +
-      '<input type="number" id="quiz-seq-start" class="num-input" min="' + minId + '" max="' + maxId + '" value="' + resumeId + '" /></div>' +
+      '<input type="number" id="quiz-seq-start" class="num-input" min="' + minNum + '" max="' + maxNum + '" value="' + resumeNum + '" /></div>' +
       "</div>";
     html += '<button class="btn-primary" id="btn-start-quiz">开始测试</button>';
 
@@ -1022,11 +1053,16 @@
       var ids = QUESTIONS.map(function (q) { return q.id; });
       var isSeq = order === "seq";
       if (isSeq) {
-        var startId = parseInt(seqStartInput.value, 10) || minId;
-        startId = Math.min(Math.max(startId, minId), maxId);
+        var startNumVal = parseInt(seqStartInput.value, 10) || minNum;
+        startNumVal = Math.min(Math.max(startNumVal, minNum), maxNum);
+        // Resolve the typed display number to the closest question at or
+        // after it, in case the exact number was skipped in the source.
+        var startQSetup = sortedByNumSetup.find(function (q) { return displayQNum(q) >= startNumVal; }) || sortedByNumSetup[0];
+        var startId = startQSetup.id;
         currentExamState().quizSeqCursor = startId;
         saveState();
-        // Resume sequential order from the chosen starting question.
+        // Resume sequential order (by display number) from the chosen question.
+        ids = sortedByNumSetup.map(function (q) { return q.id; });
         ids = ids.filter(function (id) { return id >= startId; }).concat(ids.filter(function (id) { return id < startId; }));
       } else {
         ids = shuffle(ids);
@@ -1081,10 +1117,10 @@
 
     var html = "";
     html += '<div class="q-progress"><span>第 ' + (index + 1) + " / " + ids.length + " 题</span>" +
-      '<span>原题号 #' + q.id + "</span></div>";
+      '<span>原题号 #' + displayQNum(q) + "</span></div>";
 
     html += '<div class="q-card">';
-    html += '<span class="q-num-badge">Q' + q.id + "</span>";
+    html += '<span class="q-num-badge">Q' + displayQNum(q) + "</span>";
     html += questionTypeBadge(q);
     html += bilingualBlock(q.stem.zh, q.stem.en, { primaryClass: "q-stem", secondaryClass: "q-stem secondary" });
 
@@ -1290,10 +1326,10 @@
 
     var html = "";
     html += '<div class="q-progress"><span>第 ' + (index + 1) + " / " + ids.length + " 题</span>" +
-      '<span>原题号 #' + q.id + "</span></div>";
+      '<span>原题号 #' + displayQNum(q) + "</span></div>";
 
     html += '<div class="q-card">';
-    html += '<span class="q-num-badge">Q' + q.id + "</span>";
+    html += '<span class="q-num-badge">Q' + displayQNum(q) + "</span>";
     html += questionTypeBadge(q);
     html += bilingualBlock(q.stem.zh, q.stem.en, { primaryClass: "q-stem", secondaryClass: "q-stem secondary" });
 
