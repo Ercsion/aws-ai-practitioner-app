@@ -1,6 +1,6 @@
 // Offline cache for the AIF-C01 study app (PWA), with an explicit
 // update-prompt flow instead of silently auto-activating new versions.
-var CACHE_NAME = "aif-app-cache-v16";
+var CACHE_NAME = "aif-app-cache-v17";
 var ASSETS = [
   "./index.html",
   "./style.css",

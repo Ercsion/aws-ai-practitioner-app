@@ -19251,7 +19251,7 @@ window.QUESTIONS = [
       "zh": [
         {
           "label": "A",
-          "text": "及时处理"
+          "text": "提示词管理"
         },
         {
           "label": "B",
@@ -19735,7 +19735,7 @@ window.QUESTIONS = [
         },
         {
           "label": "C",
-          "text": "突然袭击"
+          "text": "提示词攻击"
         },
         {
           "label": "D",
@@ -19887,7 +19887,7 @@ window.QUESTIONS = [
         },
         {
           "label": "B",
-          "text": "活塞杆泄漏"
+          "text": "提示词泄露"
         },
         {
           "label": "C",
@@ -20051,7 +20051,7 @@ window.QUESTIONS = [
         },
         {
           "label": "D",
-          "text": "及时处理"
+          "text": "提示词管理"
         }
       ],
       "en": [
