@@ -17959,7 +17959,7 @@ window.QUESTIONS = [
         },
         {
           "label": "C",
-          "text": "提高温度并缩短响应时间。"
+          "text": "提高温度并缩短响应长度。"
         },
         {
           "label": "D",
