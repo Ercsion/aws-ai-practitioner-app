@@ -119,10 +119,6 @@
     es.progress[id] = { attempted: true, correct: true };
     saveState();
   }
-  function clearWrongBook() {
-    currentExamState().wrongIds = [];
-    saveState();
-  }
   function removeFromWrongBook(id) {
     var es = currentExamState();
     var idx = es.wrongIds.indexOf(id);
@@ -1341,19 +1337,18 @@
     if (ids.length === 0) {
       html += '<div class="empty-state"><div class="ic">&#128077;</div><div class="msg">暂无错题，继续加油！</div></div>';
     } else {
+      html += '<button class="btn-primary" id="btn-review-all">开始复习错题</button>';
+      html += '<button class="btn-primary" id="btn-test-wrong">错题测试</button>';
       html += '<div class="section-title">错题列表</div>';
       ids.forEach(function (id) {
         var q = questionById(id);
         if (!q) return;
         html += '<div class="list-row wrong" data-id="' + id + '">' +
-          '<div class="lr-num">Q' + id + "</div>" +
+          '<div class="lr-num">Q' + displayQNum(q) + "</div>" +
           '<div class="lr-text">' + escapeHtml(state.lang === "en" ? q.stem.en : q.stem.zh) + "</div>" +
           '<div class="lr-chev">&#8250;</div>' +
           "</div>";
       });
-      html += '<button class="btn-primary" id="btn-review-all">开始复习错题</button>';
-      html += '<button class="btn-primary" id="btn-test-wrong">错题测试</button>';
-      html += '<button class="btn-secondary btn-danger-outline" id="btn-clear-wrong">清空错题本</button>';
     }
 
     elApp.innerHTML = html;
@@ -1372,14 +1367,6 @@
     var testBtn = elApp.querySelector("#btn-test-wrong");
     if (testBtn) testBtn.addEventListener("click", function () {
       startWrongBookQuiz();
-    });
-    var clearBtn = elApp.querySelector("#btn-clear-wrong");
-    if (clearBtn) clearBtn.addEventListener("click", function () {
-      if (confirm("确定要清空错题本吗？此操作不可撤销。")) {
-        clearWrongBook();
-        render();
-        toast("错题本已清空");
-      }
     });
   }
 
