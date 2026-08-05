@@ -1131,6 +1131,11 @@
     var answers = opts.answers; // id -> answer (format depends on question type)
     var submitted = opts.submitted; // id -> true/false
     var isSeq = !!opts.seq;
+    // "wrongbook" source marks a quiz launched from the wrong book ("错题
+    // 测试"): same interactive quiz flow, but the result screen offers to
+    // go back to the wrong book / retry the remaining wrong questions
+    // instead of the normal quiz-setup retry.
+    var source = opts.source;
 
     var q = questionById(ids[index]);
     var userAnswer = answers[q.id];
@@ -1185,7 +1190,7 @@
     elApp.innerHTML = html;
 
     function rerender() {
-      replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq });
+      replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq, source: source });
     }
 
     if (!isSubmitted) {
@@ -1209,21 +1214,21 @@
 
     var prevBtn = elApp.querySelector("#btn-prev");
     if (prevBtn) prevBtn.addEventListener("click", function () {
-      if (index > 0) replaceView("quiz", { ids: ids, index: index - 1, answers: answers, submitted: submitted, seq: isSeq });
+      if (index > 0) replaceView("quiz", { ids: ids, index: index - 1, answers: answers, submitted: submitted, seq: isSeq, source: source });
     });
     var nextBtn = elApp.querySelector("#btn-next");
     if (nextBtn) nextBtn.addEventListener("click", function () {
-      if (index < ids.length - 1) replaceView("quiz", { ids: ids, index: index + 1, answers: answers, submitted: submitted, seq: isSeq });
+      if (index < ids.length - 1) replaceView("quiz", { ids: ids, index: index + 1, answers: answers, submitted: submitted, seq: isSeq, source: source });
     });
     var finishBtn = elApp.querySelector("#btn-finish");
     if (finishBtn) finishBtn.addEventListener("click", function () {
-      replaceView("quiz-result", { ids: ids, answers: answers, submitted: submitted });
+      replaceView("quiz-result", { ids: ids, answers: answers, submitted: submitted, source: source });
     });
     var toggleWrongBtn = elApp.querySelector("#btn-toggle-wrong");
     if (toggleWrongBtn) toggleWrongBtn.addEventListener("click", function () {
       var added = toggleWrongBook(q.id);
       toast(added ? "已加入错题本" : "已从错题本移除");
-      replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq });
+      replaceView("quiz", { ids: ids, index: index, answers: answers, submitted: submitted, seq: isSeq, source: source });
     });
   }
 
@@ -1241,6 +1246,7 @@
   function renderQuizResult(opts) {
     var ids = opts.ids;
     var answers = opts.answers;
+    var isWrongBookQuiz = opts.source === "wrongbook";
     var correctCount = 0;
     var wrongList = [];
     ids.forEach(function (id) {
@@ -1261,21 +1267,32 @@
       "</div></div>";
 
     if (wrongList.length > 0) {
-      html += '<div class="section-title">本次错题</div>';
+      html += '<div class="section-title">' + (isWrongBookQuiz ? "仍未掌握" : "本次错题") + '</div>';
       wrongList.forEach(function (id) {
         var q = questionById(id);
         html += '<div class="list-row wrong" data-id="' + id + '">' +
-          '<div class="lr-num">Q' + id + "</div>" +
+          '<div class="lr-num">Q' + displayQNum(q) + "</div>" +
           '<div class="lr-text">' + escapeHtml(state.lang === "en" ? q.stem.en : q.stem.zh) + "</div>" +
           '<div class="lr-chev">&#8250;</div>' +
           "</div>";
       });
     } else {
-      html += '<div class="empty-state"><div class="ic">&#127881;</div><div class="msg">全部答对，太棒了！</div></div>';
+      html += '<div class="empty-state"><div class="ic">&#127881;</div><div class="msg">' +
+        (isWrongBookQuiz ? "错题全部答对，已从错题本移除！" : "全部答对，太棒了！") + "</div></div>";
     }
 
-    html += '<button class="btn-primary" id="btn-retry">再测一次</button>';
-    html += '<button class="btn-secondary" id="btn-home">返回首页</button>';
+    if (isWrongBookQuiz) {
+      // Answering correctly during a wrong-book quiz already removes the
+      // question from the wrong book (via markCorrect), so offer to
+      // immediately retest whatever's left, or head back to the list.
+      if (wrongList.length > 0) {
+        html += '<button class="btn-primary" id="btn-retry">再测一次剩余错题</button>';
+      }
+      html += '<button class="btn-secondary" id="btn-back-wrongbook">返回错题本</button>';
+    } else {
+      html += '<button class="btn-primary" id="btn-retry">再测一次</button>';
+      html += '<button class="btn-secondary" id="btn-home">返回首页</button>';
+    }
 
     elApp.innerHTML = html;
 
@@ -1285,10 +1302,34 @@
         navigate("wrongbook-review", { ids: wrongList, index: wrongList.indexOf(id) });
       });
     });
-    elApp.querySelector("#btn-retry").addEventListener("click", function () {
-      replaceView("quiz-setup");
+    var retryBtn = elApp.querySelector("#btn-retry");
+    if (retryBtn) retryBtn.addEventListener("click", function () {
+      if (isWrongBookQuiz) {
+        startWrongBookQuiz();
+      } else {
+        replaceView("quiz-setup");
+      }
     });
-    elApp.querySelector("#btn-home").addEventListener("click", goHome);
+    var backWrongBtn = elApp.querySelector("#btn-back-wrongbook");
+    if (backWrongBtn) backWrongBtn.addEventListener("click", function () {
+      replaceView("wrongbook");
+    });
+    var homeBtn = elApp.querySelector("#btn-home");
+    if (homeBtn) homeBtn.addEventListener("click", goHome);
+  }
+
+  // Launches an interactive quiz over the current wrong book (all
+  // questions currently marked wrong for the active exam), in the same
+  // random-order multi-question quiz flow as a regular quiz, tagged with
+  // source: "wrongbook" so the result screen behaves appropriately.
+  function startWrongBookQuiz() {
+    var ids = currentExamState().wrongIds.slice();
+    if (ids.length === 0) {
+      toast("错题本是空的");
+      return;
+    }
+    ids = shuffle(ids);
+    navigate("quiz", { ids: ids, index: 0, answers: {}, submitted: {}, seq: false, source: "wrongbook" });
   }
 
   // ---- Wrong book list ----
@@ -1311,6 +1352,7 @@
           "</div>";
       });
       html += '<button class="btn-primary" id="btn-review-all">开始复习错题</button>';
+      html += '<button class="btn-primary" id="btn-test-wrong">错题测试</button>';
       html += '<button class="btn-secondary btn-danger-outline" id="btn-clear-wrong">清空错题本</button>';
     }
 
@@ -1326,6 +1368,10 @@
     var reviewBtn = elApp.querySelector("#btn-review-all");
     if (reviewBtn) reviewBtn.addEventListener("click", function () {
       navigate("wrongbook-review", { ids: ids, index: 0 });
+    });
+    var testBtn = elApp.querySelector("#btn-test-wrong");
+    if (testBtn) testBtn.addEventListener("click", function () {
+      startWrongBookQuiz();
     });
     var clearBtn = elApp.querySelector("#btn-clear-wrong");
     if (clearBtn) clearBtn.addEventListener("click", function () {
